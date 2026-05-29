@@ -3,9 +3,39 @@ import cv2
 import torch
 import pandas as pd
 import numpy as np
+import re
 from torch.utils.data import Dataset
 import config
 from transformers import AutoTokenizer
+
+
+def denoise_frame(frame):
+    """Apply bilateral filtering to reduce frame noise."""
+    if frame.dtype != np.uint8:
+        frame = np.uint8(np.clip(frame * 255, 0, 255))
+    
+    denoised = cv2.bilateralFilter(frame, d=9, sigmaColor=75, sigmaSpace=75)
+    denoised = cv2.bilateralFilter(denoised, d=7, sigmaColor=50, sigmaSpace=50)
+    
+    return denoised.astype(np.float32) / 255.0
+
+
+def denoise_text(text):
+    """Aggressively denoise text data."""
+    if not isinstance(text, str):
+        return ""
+    
+    text = re.sub(r'http[s]?://\S+', '', text)
+    text = re.sub(r'\S+@\S+', '', text)
+    text = re.sub(r'\[\d{2}:\d{2}(?::\d{2})?\]', '', text)
+    text = re.sub(r'#\S+', '', text)
+    text = re.sub(r'@\S+', '', text)
+    text = re.sub(r'(\w)\1{2,}', r'\1', text)
+    text = re.sub(r'\s+', ' ', text)
+    text = text.lower().strip()
+    text = re.sub(r'[^\x00-\x7F]+', '', text)
+    
+    return text
 
 
 class DeceptionDataset(Dataset):
@@ -42,8 +72,10 @@ class DeceptionDataset(Dataset):
             ret, frame = cap.read()
             if not ret:
                 break
+            # Denoise the frame
+            frame = denoise_frame(frame / 255.0) * 255 if frame.dtype == np.uint8 else denoise_frame(frame)
             # Resize and normalize
-            frame = cv2.resize(frame, self.resize)
+            frame = cv2.resize(np.uint8(frame) if frame.dtype != np.uint8 else frame, self.resize)
             frame = frame / 255.0  # Scale pixel values to [0, 1]
             frames.append(frame)
         cap.release()
@@ -72,6 +104,14 @@ class LinguisticDataset(Dataset):
 
     def __getitem__(self, idx):
         text = str(self.data.iloc[idx]['transcript']).strip()
+        
+        # Apply aggressive text denoising
+        text = denoise_text(text)
+        
+        if len(text) == 0:
+            # Return a safe default if text is empty after denoising
+            text = "unknown"
+        
         label_str = str(self.data.iloc[idx]['label']).lower().strip()
 
         mapping = {'truth': 0, 'deception': 1}

@@ -16,6 +16,27 @@ model.eval()
 model = torch.nn.Sequential(*list(model.children())[:-1])
 
 
+def denoise_frame(frame):
+    """
+    Apply aggressive bilateral filtering to denoise video frames.
+    Bilateral filter reduces noise while preserving edges effectively.
+    """
+    # Convert to uint8 if needed for bilateral filter
+    if frame.dtype != np.uint8:
+        frame = np.uint8(np.clip(frame, 0, 255))
+    
+    # Apply bilateral filter multiple times for maximum noise reduction
+    # d=9: diameter of pixel neighborhood
+    # sigmaColor=75: color sigma (large = similar colors merged)
+    # sigmaSpace=75: spatial sigma (large = further pixels influenced)
+    denoised = cv2.bilateralFilter(frame, d=9, sigmaColor=75, sigmaSpace=75)
+    
+    # Apply a second pass for additional smoothing (aggressive denoising)
+    denoised = cv2.bilateralFilter(denoised, d=7, sigmaColor=50, sigmaSpace=50)
+    
+    return denoised
+
+
 def preprocess_video(video_path, num_frames=16):
     cap = cv2.VideoCapture(video_path)
     frames = []
@@ -23,6 +44,8 @@ def preprocess_video(video_path, num_frames=16):
         while True:
             ret, frame = cap.read()
             if not ret: break
+            # Denoise the frame
+            frame = denoise_frame(frame)
             # R(2+1)D expects 112x112 images
             frame = cv2.resize(frame, (112, 112))
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)

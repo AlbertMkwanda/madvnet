@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import spacy
 import os
+import re
 from textblob import TextBlob
 from transformers import RobertaTokenizer, RobertaModel
 from tqdm import tqdm
@@ -28,7 +29,47 @@ model.eval()
 
 
 # ==========================================
-# 2. FEATURE EXTRACTION LOGIC
+# 2. TEXT DENOISING LOGIC
+# ==========================================
+def denoise_text(text):
+    """
+    Aggressively denoise and normalize text by removing artifacts,
+    extra whitespace, and non-linguistic noise while preserving semantic content.
+    """
+    if not isinstance(text, str) or len(text.strip()) == 0:
+        return ""
+    
+    # 1. Remove URLs and email addresses
+    text = re.sub(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', '', text)
+    text = re.sub(r'\S+@\S+', '', text)
+    
+    # 2. Remove timestamps and special formatting (e.g., [00:23], **, ##)
+    text = re.sub(r'\[\d{2}:\d{2}(?::\d{2})?\]', '', text)
+    text = re.sub(r'[\*_]{2,}', '', text)
+    text = re.sub(r'#{1,6}\s+', '', text)
+    
+    # 3. Remove repeated characters (stuttering noise like "soooooo" -> "so")
+    text = re.sub(r'(\w)\\1{2,}', r'\1', text)
+    
+    # 4. Remove extra whitespace
+    text = re.sub(r'\s+', ' ', text)
+    text = text.strip()
+    
+    # 5. Convert to lowercase
+    text = text.lower()
+    
+    # 6. Remove special characters except basic punctuation
+    text = re.sub(r'[^a-z0-9\s.!?,\'-]', '', text)
+    
+    # 7. Fix spacing around punctuation
+    text = re.sub(r'\s+([.!?,])', r'\1', text)
+    text = re.sub(r"(['])(\s)", r'\1', text)
+    
+    return text
+
+
+# ==========================================
+# 3. FEATURE EXTRACTION LOGIC
 # ==========================================
 def get_liu_handcrafted_features(text):
     """Extracts the 7 Theoretical Deception Cues based on Liu et al."""
@@ -77,6 +118,12 @@ def extract_775_linguistic_features(csv_path, output_name):
 
     for _, row in tqdm(df.iterrows(), total=len(df)):
         text = str(row['transcript']) if pd.notnull(row['transcript']) else ""
+        
+        # Apply aggressive text denoising
+        text = denoise_text(text)
+        
+        if len(text) == 0:
+            continue
 
         # A. Neural Extraction (RoBERTa-base: 768-dim)
         inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True, max_length=128).to(device)
@@ -108,7 +155,7 @@ def extract_775_linguistic_features(csv_path, output_name):
 
 
 # ==========================================
-# 3. EXECUTION
+# 4. EXECUTION
 # ==========================================
 if __name__ == "__main__":
     DATA_DIR = "C:/Users/User/Documents/Projects/main-project/data/"

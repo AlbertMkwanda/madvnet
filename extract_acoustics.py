@@ -6,6 +6,8 @@ import subprocess
 from tqdm import tqdm
 import shutil
 import imageio_ffmpeg as ffmpeg
+from scipy import signal
+from scipy.fftpack import fft, ifft
 # 1. FFmpeg environment setup
 actual_ffmpeg_path = ffmpeg.get_ffmpeg_exe()
 ffmpeg_dir = os.path.dirname(actual_ffmpeg_path)
@@ -17,6 +19,39 @@ os.environ["PATH"] += os.pathsep + ffmpeg_dir
 os.environ["IMAGEIO_FFMPEG_EXE"] = actual_ffmpeg_path
 
 
+def denoise_audio(y, sr):
+    """
+    Apply aggressive noise reduction to audio using multiple techniques.
+    Combines spectral subtraction and Wiener filtering for maximum noise reduction.
+    """
+    # 1. Spectral Subtraction: Reduces broadband noise
+    D = librosa.stft(y)
+    magnitude = np.abs(D)
+    phase = np.angle(D)
+    
+    # Estimate noise floor from quietest frames
+    noise_floor = np.percentile(magnitude, 10, axis=1, keepdims=True)
+    
+    # Aggressive spectral subtraction (2x multiplier for maximum reduction)
+    magnitude_reduced = magnitude - 2.0 * noise_floor
+    magnitude_reduced = np.maximum(magnitude_reduced, 0.1 * noise_floor)  # Prevent over-subtraction
+    
+    # Reconstruct with original phase
+    D_reduced = magnitude_reduced * np.exp(1j * phase)
+    y_spectral = librosa.istft(D_reduced)
+    
+    # 2. Wiener Filter: Reduces noise while preserving signal
+    # Apply Wiener filter for additional smoothing
+    y_wiener = signal.wiener(y_spectral, mysize=min(int(sr * 0.01), 100))  # 10ms window
+    
+    # 3. Normalization to prevent clipping
+    max_val = np.max(np.abs(y_wiener))
+    if max_val > 0:
+        y_wiener = y_wiener / max_val
+    
+    return y_wiener
+
+
 def extract_audio_features(video_path):
     temp_wav = "temp_audio.wav"
     try:
@@ -26,6 +61,9 @@ def extract_audio_features(video_path):
 
         y, sr = librosa.load(temp_wav, sr=22050, duration=60)
         if len(y) == 0: return None
+        
+        # Apply aggressive denoising
+        y = denoise_audio(y, sr)
 
         # Features to extract
         mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=20)

@@ -3,6 +3,22 @@ import torch
 import numpy as np
 
 
+def denoise_frame(frame):
+    """
+    Apply aggressive bilateral filtering to denoise video frames.
+    Reduces noise while preserving edges and important visual features.
+    """
+    if frame.dtype != np.uint8:
+        frame = np.uint8(np.clip(frame * 255, 0, 255))
+    
+    # Apply bilateral filter twice for maximum noise reduction
+    denoised = cv2.bilateralFilter(frame, d=9, sigmaColor=75, sigmaSpace=75)
+    denoised = cv2.bilateralFilter(denoised, d=7, sigmaColor=50, sigmaSpace=50)
+    
+    # Normalize back to [0, 1]
+    return denoised.astype(np.float32) / 255.0
+
+
 def preprocess_video(video_path, num_frames=16, resize_dim=(112, 112)):
     """
     Extracts frames from a video, resizes them, and prepares a 4D tensor.
@@ -21,8 +37,11 @@ def preprocess_video(video_path, num_frames=16, resize_dim=(112, 112)):
         if not ret:
             break
 
+        # Denoise the frame
+        frame = denoise_frame(frame / 255.0) * 255.0 if frame.dtype == np.uint8 else denoise_frame(frame)
+        
         # Convert BGR (OpenCV default) to RGB
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        frame = cv2.cvtColor(np.uint8(frame), cv2.COLOR_BGR2RGB)
         # Resize to match model input (MADV-Net standard)
         frame = cv2.resize(frame, resize_dim)
         # Normalize pixel values to [0, 1]

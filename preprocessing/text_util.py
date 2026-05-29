@@ -3,13 +3,38 @@ import torch
 
 def clean_transcript(text):
     """
-    Basic text cleaning for the Linguistic Brain.
+    Aggressive text cleaning for the Linguistic Brain.
+    Removes noise, artifacts, and normalizes text while preserving semantic content.
     """
     if not text:
         return ""
-    # Lowercase and remove special characters/punctuation
+    
+    text = str(text)
+    
+    # Remove URLs and emails
+    text = re.sub(r'http[s]?://\S+', '', text)
+    text = re.sub(r'\S+@\S+', '', text)
+    
+    # Remove timestamps, hashtags, mentions
+    text = re.sub(r'\[\d{2}:\d{2}(?::\d{2})?\]', '', text)
+    text = re.sub(r'#\S+', '', text)
+    text = re.sub(r'@\S+', '', text)
+    
+    # Remove repeated characters (stuttering)
+    text = re.sub(r'(\w)\1{2,}', r'\1', text)
+    
+    # Normalize whitespace
+    text = re.sub(r'\s+', ' ', text)
+    
+    # Lowercase
     text = text.lower()
-    text = re.sub(r'[^\w\s]', '', text)
+    
+    # Remove non-ASCII characters
+    text = re.sub(r'[^\x00-\x7F]+', '', text)
+    
+    # Remove special characters except basic punctuation (keep for semantic meaning)
+    text = re.sub(r'[^a-z0-9\s.!?,\'-]', '', text)
+    
     return text.strip()
 
 def tokenize_for_model(text, tokenizer, max_length=128):

@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader, TensorDataset
 import os
 import pandas as pd
 from training_utils import TrainingMetrics, evaluate_model_with_bias_analysis
+from sklearn.preprocessing import StandardScaler
 
 # Original VisualBrain model with residual connection (unchanged)
 class VisualBrain(nn.Module):
@@ -69,40 +70,53 @@ def load_dataset_split(split_file: str, label_col: str = 'label'):
 
 
 def prepare_dataloaders(visual_data_dir: str = "data"):
-    """Prepare train, test, and validation dataloaders."""
+    """Prepare train, test (RLDD/Dolos), and validation dataloaders with StandardScaler normalization."""
     
-    # Load original train/test splits
+    # Load training data
     x_train = np.load(f"{visual_data_dir}/visual_train_x.npy")
     y_train = np.load(f"{visual_data_dir}/visual_train_y.npy")
-    x_test = np.load(f"{visual_data_dir}/visual_test_x.npy")
-    y_test = np.load(f"{visual_data_dir}/visual_test_y.npy")
-
-    # Load Dolos splits if available
-    dolos_train_csv = f"{visual_data_dir}/dolos_train_split.csv"
-    dolos_test_csv = f"{visual_data_dir}/dolos_test_split.csv"
-    dolos_val_csv = f"{visual_data_dir}/dolos_validation_split.csv"
+    
+    # Fit StandardScaler on training data ONLY
+    scaler = StandardScaler()
+    x_train_scaled = scaler.fit_transform(x_train)
+    
+    # Load RLDD test set and apply scaler
+    x_test_rldd = np.load(f"{visual_data_dir}/visual_test_rldd_x.npy")
+    y_test_rldd = np.load(f"{visual_data_dir}/visual_test_rldd_y.npy")
+    x_test_rldd_scaled = scaler.transform(x_test_rldd)
+    
+    # Load Dolos test set and apply scaler
+    x_test_dolos = np.load(f"{visual_data_dir}/visual_test_dolos_x.npy")
+    y_test_dolos = np.load(f"{visual_data_dir}/visual_test_dolos_y.npy")
+    x_test_dolos_scaled = scaler.transform(x_test_dolos)
+    
+    # Load Dolos validation set and apply scaler
+    x_val_dolos = np.load(f"{visual_data_dir}/visual_val_dolos_x.npy")
+    y_val_dolos = np.load(f"{visual_data_dir}/visual_val_dolos_y.npy")
+    x_val_dolos_scaled = scaler.transform(x_val_dolos)
     
     loaders = {}
     datasets = {}
     
     # Create train loader
-    train_ds = TensorDataset(torch.FloatTensor(x_train), torch.LongTensor(y_train))
+    train_ds = TensorDataset(torch.FloatTensor(x_train_scaled), torch.LongTensor(y_train))
     loaders['train'] = DataLoader(train_ds, batch_size=32, shuffle=True)
-    datasets['train'] = ('RLDD Train', len(y_train))
+    datasets['train'] = ('Combined Train', len(y_train))
     
-    # Create test loader
-    test_ds = TensorDataset(torch.FloatTensor(x_test), torch.LongTensor(y_test))
-    loaders['test_rldd'] = DataLoader(test_ds, batch_size=32)
-    datasets['test_rldd'] = ('RLDD Test', len(y_test))
+    # Create RLDD test loader
+    test_ds_rldd = TensorDataset(torch.FloatTensor(x_test_rldd_scaled), torch.LongTensor(y_test_rldd))
+    loaders['test_rldd'] = DataLoader(test_ds_rldd, batch_size=32)
+    datasets['test_rldd'] = ('RLDD Test', len(y_test_rldd))
     
-    # Load and create Dolos splits if available
-    if os.path.exists(dolos_test_csv):
-        dolos_test_df, dolos_test_labels = load_dataset_split(dolos_test_csv)
-        print("  ℹ️  Dolos test split found (features need extraction)")
+    # Create Dolos test loader
+    test_ds_dolos = TensorDataset(torch.FloatTensor(x_test_dolos_scaled), torch.LongTensor(y_test_dolos))
+    loaders['test_dolos'] = DataLoader(test_ds_dolos, batch_size=32)
+    datasets['test_dolos'] = ('Dolos Test', len(y_test_dolos))
     
-    if os.path.exists(dolos_val_csv):
-        dolos_val_df, dolos_val_labels = load_dataset_split(dolos_val_csv)
-        print("  ℹ️  Dolos validation split found (features need extraction)")
+    # Create Dolos validation loader
+    val_ds_dolos = TensorDataset(torch.FloatTensor(x_val_dolos_scaled), torch.LongTensor(y_val_dolos))
+    loaders['val_dolos'] = DataLoader(val_ds_dolos, batch_size=32)
+    datasets['val_dolos'] = ('Dolos Validation', len(y_val_dolos))
     
     return loaders, datasets
 
@@ -118,27 +132,27 @@ def train_visual_with_bias_testing():
         return
 
     # Prepare data loaders
-    print("\n📂 Preparing data loaders...")
+    print("\n[*] Preparing data loaders...")
     loaders, datasets = prepare_dataloaders()
     
     for split, info in datasets.items():
-        print(f"  ✓ {info[0]}: {info[1]} samples")
+        print(f"  [OK] {info[0]}: {info[1]} samples")
     
     # Initialize model
     device = torch.device("cpu")
     model = VisualBrain(input_size=512).to(device)
-    print(f"\n🧠 Model initialized on {device}")
+    print(f"\n[MODEL] Model initialized on {device}")
 
     # Loss and Optimizer
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
-    optimizer = optim.Adam(model.parameters(), lr=0.0005)
+    optimizer = optim.Adam(model.parameters(), lr=0.0001, weight_decay=0.01)
     
     # Initialize metrics handler
     metrics_handler = TrainingMetrics("VisualBrain")
     
     # Training loop
-    num_epochs = 100
-    print(f"\n🚀 Starting training ({num_epochs} epochs)...\n")
+    num_epochs = 1000
+    print(f"\n[TRAIN] Starting training ({num_epochs} epochs)...\n")
     
     for epoch in range(num_epochs):
         # Training phase
@@ -164,11 +178,11 @@ def train_visual_with_bias_testing():
         train_loss /= len(loaders['train'])
         train_acc = train_correct / train_total
         
-        # Validation phase
+        # Validation phase on RLDD test set
         model.eval()
-        test_loss = 0.0
-        test_correct = 0
-        test_total = 0
+        test_loss_rldd = 0.0
+        test_correct_rldd = 0
+        test_total_rldd = 0
         
         with torch.no_grad():
             for inputs, labels in loaders['test_rldd']:
@@ -176,43 +190,63 @@ def train_visual_with_bias_testing():
                 outputs = model(inputs)
                 loss = criterion(outputs, labels)
                 
-                test_loss += loss.item()
+                test_loss_rldd += loss.item()
                 _, predicted = torch.max(outputs.data, 1)
-                test_total += labels.size(0)
-                test_correct += (predicted == labels).sum().item()
+                test_total_rldd += labels.size(0)
+                test_correct_rldd += (predicted == labels).sum().item()
         
-        test_loss /= len(loaders['test_rldd'])
-        test_acc = test_correct / test_total
+        test_loss_rldd /= len(loaders['test_rldd'])
+        test_acc_rldd = test_correct_rldd / test_total_rldd
         
-        # Record metrics
-        metrics_handler.record_epoch(train_loss, train_acc, test_loss, test_acc)
+        # Validation phase on Dolos test set
+        test_loss_dolos = 0.0
+        test_correct_dolos = 0
+        test_total_dolos = 0
+        
+        with torch.no_grad():
+            for inputs, labels in loaders['test_dolos']:
+                inputs, labels = inputs.to(device), labels.to(device)
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+                
+                test_loss_dolos += loss.item()
+                _, predicted = torch.max(outputs.data, 1)
+                test_total_dolos += labels.size(0)
+                test_correct_dolos += (predicted == labels).sum().item()
+        
+        test_loss_dolos /= len(loaders['test_dolos'])
+        test_acc_dolos = test_correct_dolos / test_total_dolos
+        
+        # Record metrics (use RLDD for primary tracking)
+        metrics_handler.record_epoch(train_loss, train_acc, test_loss_rldd, test_acc_rldd)
         
         # Print progress
         if (epoch + 1) % 10 == 0:
             print(f"Epoch [{epoch+1}/{num_epochs}] "
-                  f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f} | "
-                  f"Test Loss: {test_loss:.4f}, Test Acc: {test_acc:.4f}")
+                  f"RLDD Test Acc: {test_acc_rldd:.4f} | Dolos Test Acc: {test_acc_dolos:.4f}")
     
-    print(f"\n✓ Training completed!")
+    print(f"\n[OK] Training completed!")
     
     # Save model
     model_path = "checkpoints/visual_brain_final.pth"
     os.makedirs("checkpoints", exist_ok=True)
     torch.save(model.state_dict(), model_path)
-    print(f"✓ Model saved: {model_path}")
+    print(f"[OK] Model saved: {model_path}")
     
     # Generate visualizations and reports
-    print("\n📊 Generating visualizations and reports...")
+    print("\n[PLOT] Generating visualizations and reports...")
     
     # Plot training curves
     metrics_handler.plot_training_curves()
     
     # Evaluate on all datasets and perform bias analysis
-    print("\n🔍 Performing bias analysis across datasets...")
+    print("\n[BIAS] Performing bias analysis across datasets...")
     
-    # Create evaluation loaders dict
+    # Create evaluation loaders dict with all 3 test sets
     eval_loaders = {
-        'RLDD_Test': loaders['test_rldd']
+        'RLDD_Test': loaders['test_rldd'],
+        'Dolos_Test': loaders['test_dolos'],
+        'Dolos_Validation': loaders['val_dolos']
     }
     
     metrics_handler, results_dict = evaluate_model_with_bias_analysis(
@@ -235,7 +269,7 @@ def train_visual_with_bias_testing():
         print(f"  Recall:    {metrics['recall']:.4f}")
         print(f"  F1-Score:  {metrics['f1']:.4f}")
     
-    print(f"\n📁 Results saved to: training_results/VisualBrain/")
+    print(f"\n[RESULTS] Results saved to: training_results/VisualBrain/")
     print("=" * 70)
 
 if __name__ == "__main__":

@@ -102,43 +102,90 @@ class FusionDataLoader:
 
 
 def prepare_fusion_dataloaders(data_dir: str = "data"):
-    """Prepare dataloaders for fusion model."""
+    """Prepare dataloaders for fusion model with 4 splits and StandardScaler normalization."""
     
-    # Load all modalities
+    # Load training data for all modalities
     x_train_acoustic = np.load(f"{data_dir}/acoustic_train_x.npy")
-    x_test_acoustic = np.load(f"{data_dir}/acoustic_test_x.npy")
-    
     x_train_linguistic = np.load(f"{data_dir}/linguistic_train_x.npy")
-    x_test_linguistic = np.load(f"{data_dir}/linguistic_test_x.npy")
-    
     x_train_visual = np.load(f"{data_dir}/visual_train_x.npy")
-    x_test_visual = np.load(f"{data_dir}/visual_test_x.npy")
-    
     y_train = np.load(f"{data_dir}/acoustic_train_y.npy")
-    y_test = np.load(f"{data_dir}/acoustic_test_y.npy")
     
-    # Scale linguistic features
-    scaler = StandardScaler()
-    x_train_linguistic_scaled = scaler.fit_transform(x_train_linguistic)
-    x_test_linguistic_scaled = scaler.transform(x_test_linguistic)
+    # Fit StandardScaler on training data ONLY for each modality
+    scaler_acoustic = StandardScaler()
+    x_train_acoustic_scaled = scaler_acoustic.fit_transform(x_train_acoustic)
+    
+    scaler_linguistic = StandardScaler()
+    x_train_linguistic_scaled = scaler_linguistic.fit_transform(x_train_linguistic)
+    
+    scaler_visual = StandardScaler()
+    x_train_visual_scaled = scaler_visual.fit_transform(x_train_visual)
+    
+    # Load RLDD test set and apply scalers
+    x_test_rldd_acoustic = np.load(f"{data_dir}/acoustic_test_rldd_x.npy")
+    x_test_rldd_linguistic = np.load(f"{data_dir}/linguistic_test_rldd_x.npy")
+    x_test_rldd_visual = np.load(f"{data_dir}/visual_test_rldd_x.npy")
+    y_test_rldd = np.load(f"{data_dir}/acoustic_test_rldd_y.npy")
+    
+    x_test_rldd_acoustic_scaled = scaler_acoustic.transform(x_test_rldd_acoustic)
+    x_test_rldd_linguistic_scaled = scaler_linguistic.transform(x_test_rldd_linguistic)
+    x_test_rldd_visual_scaled = scaler_visual.transform(x_test_rldd_visual)
+    
+    # Load Dolos test set and apply scalers
+    x_test_dolos_acoustic = np.load(f"{data_dir}/acoustic_test_dolos_x.npy")
+    x_test_dolos_linguistic = np.load(f"{data_dir}/linguistic_test_dolos_x.npy")
+    x_test_dolos_visual = np.load(f"{data_dir}/visual_test_dolos_x.npy")
+    y_test_dolos = np.load(f"{data_dir}/acoustic_test_dolos_y.npy")
+    
+    x_test_dolos_acoustic_scaled = scaler_acoustic.transform(x_test_dolos_acoustic)
+    x_test_dolos_linguistic_scaled = scaler_linguistic.transform(x_test_dolos_linguistic)
+    x_test_dolos_visual_scaled = scaler_visual.transform(x_test_dolos_visual)
+    
+    # Load Dolos validation set and apply scalers
+    x_val_dolos_acoustic = np.load(f"{data_dir}/acoustic_val_dolos_x.npy")
+    x_val_dolos_linguistic = np.load(f"{data_dir}/linguistic_val_dolos_x.npy")
+    x_val_dolos_visual = np.load(f"{data_dir}/visual_val_dolos_x.npy")
+    y_val_dolos = np.load(f"{data_dir}/acoustic_val_dolos_y.npy")
+    
+    x_val_dolos_acoustic_scaled = scaler_acoustic.transform(x_val_dolos_acoustic)
+    x_val_dolos_linguistic_scaled = scaler_linguistic.transform(x_val_dolos_linguistic)
+    x_val_dolos_visual_scaled = scaler_visual.transform(x_val_dolos_visual)
     
     # Create custom dataloaders
     train_loader = FusionDataLoader(
-        x_train_acoustic, x_train_linguistic_scaled, x_train_visual, y_train,
+        x_train_acoustic_scaled, x_train_linguistic_scaled, x_train_visual_scaled, y_train,
         batch_size=32, shuffle=True
     )
     
-    test_loader = FusionDataLoader(
-        x_test_acoustic, x_test_linguistic_scaled, x_test_visual, y_test,
+    test_rldd_loader = FusionDataLoader(
+        x_test_rldd_acoustic_scaled, x_test_rldd_linguistic_scaled, x_test_rldd_visual_scaled, y_test_rldd,
+        batch_size=32, shuffle=False
+    )
+    
+    test_dolos_loader = FusionDataLoader(
+        x_test_dolos_acoustic_scaled, x_test_dolos_linguistic_scaled, x_test_dolos_visual_scaled, y_test_dolos,
+        batch_size=32, shuffle=False
+    )
+    
+    val_dolos_loader = FusionDataLoader(
+        x_val_dolos_acoustic_scaled, x_val_dolos_linguistic_scaled, x_val_dolos_visual_scaled, y_val_dolos,
         batch_size=32, shuffle=False
     )
     
     datasets = {
-        'train': ('RLDD Train', len(y_train)),
-        'test': ('RLDD Test', len(y_test))
+        'train': ('Combined Train', len(y_train)),
+        'test_rldd': ('RLDD Test', len(y_test_rldd)),
+        'test_dolos': ('Dolos Test', len(y_test_dolos)),
+        'val_dolos': ('Dolos Validation', len(y_val_dolos))
     }
     
-    return train_loader, test_loader, datasets
+    loaders = {
+        'train': train_loader,
+        'test_rldd': test_rldd_loader,
+        'test_dolos': test_dolos_loader,
+        'val_dolos': val_dolos_loader
+    }
+    
+    return loaders, datasets
 
 
 def train_fusion_with_bias_testing():
@@ -159,16 +206,16 @@ def train_fusion_with_bias_testing():
             return
 
     # Prepare dataloaders
-    print("\n📂 Preparing fusion dataloaders...")
-    train_loader, test_loader, datasets = prepare_fusion_dataloaders()
+    print("\n[*] Preparing fusion dataloaders...")
+    loaders, datasets = prepare_fusion_dataloaders()
     
     for split, info in datasets.items():
-        print(f"  ✓ {info[0]}: {info[1]} samples")
+        print(f"  [OK] {info[0]}: {info[1]} samples")
     
     # Initialize model
     device = torch.device("cpu")
     model = FusionBrain().to(device)
-    print(f"\n🧠 Fusion model initialized on {device}")
+    print(f"\n[MODEL] Fusion model initialized on {device}")
     print(f"   - Acoustic pathway: 692 → 256 → 128")
     print(f"   - Linguistic pathway: 775 → 256 → 128")
     print(f"   - Visual pathway: 512 → 256 → 128")
@@ -176,14 +223,14 @@ def train_fusion_with_bias_testing():
 
     # Loss and Optimizer
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
-    optimizer = optim.AdamW(model.parameters(), lr=0.0005, weight_decay=0.01)
+    optimizer = optim.Adam(model.parameters(), lr=0.0001, weight_decay=0.01)
     
     # Initialize metrics handler
     metrics_handler = TrainingMetrics("FusionBrain")
     
     # Training loop
-    num_epochs = 100
-    print(f"\n🚀 Starting training ({num_epochs} epochs)...\n")
+    num_epochs = 1000
+    print(f"\n[TRAIN] Starting training ({num_epochs} epochs)...\n")
     
     for epoch in range(num_epochs):
         # Training phase
@@ -192,7 +239,7 @@ def train_fusion_with_bias_testing():
         train_correct = 0
         train_total = 0
         
-        for acoustic, linguistic, visual, labels in train_loader:
+        for acoustic, linguistic, visual, labels in loaders['train']:
             acoustic = acoustic.to(device)
             linguistic = linguistic.to(device)
             visual = visual.to(device)
@@ -212,14 +259,14 @@ def train_fusion_with_bias_testing():
         train_loss /= train_total
         train_acc = train_correct / train_total
         
-        # Validation phase
+        # Validation phase on RLDD test set
         model.eval()
-        test_loss = 0.0
-        test_correct = 0
-        test_total = 0
+        test_loss_rldd = 0.0
+        test_correct_rldd = 0
+        test_total_rldd = 0
         
         with torch.no_grad():
-            for acoustic, linguistic, visual, labels in test_loader:
+            for acoustic, linguistic, visual, labels in loaders['test_rldd']:
                 acoustic = acoustic.to(device)
                 linguistic = linguistic.to(device)
                 visual = visual.to(device)
@@ -228,80 +275,90 @@ def train_fusion_with_bias_testing():
                 outputs = model(acoustic, linguistic, visual)
                 loss = criterion(outputs, labels)
                 
-                test_loss += loss.item() * labels.size(0)
+                test_loss_rldd += loss.item() * labels.size(0)
                 _, predicted = torch.max(outputs.data, 1)
-                test_total += labels.size(0)
-                test_correct += (predicted == labels).sum().item()
+                test_total_rldd += labels.size(0)
+                test_correct_rldd += (predicted == labels).sum().item()
         
-        test_loss /= test_total
-        test_acc = test_correct / test_total
+        test_loss_rldd /= test_total_rldd
+        test_acc_rldd = test_correct_rldd / test_total_rldd
         
-        # Record metrics
-        metrics_handler.record_epoch(train_loss, train_acc, test_loss, test_acc)
+        # Validation phase on Dolos test set
+        test_loss_dolos = 0.0
+        test_correct_dolos = 0
+        test_total_dolos = 0
+        
+        with torch.no_grad():
+            for acoustic, linguistic, visual, labels in loaders['test_dolos']:
+                acoustic = acoustic.to(device)
+                linguistic = linguistic.to(device)
+                visual = visual.to(device)
+                labels = labels.to(device)
+                
+                outputs = model(acoustic, linguistic, visual)
+                loss = criterion(outputs, labels)
+                
+                test_loss_dolos += loss.item() * labels.size(0)
+                _, predicted = torch.max(outputs.data, 1)
+                test_total_dolos += labels.size(0)
+                test_correct_dolos += (predicted == labels).sum().item()
+        
+        test_loss_dolos /= test_total_dolos
+        test_acc_dolos = test_correct_dolos / test_total_dolos
+        
+        # Record metrics (use RLDD for primary tracking)
+        metrics_handler.record_epoch(train_loss, train_acc, test_loss_rldd, test_acc_rldd)
         
         # Print progress
         if (epoch + 1) % 10 == 0:
             print(f"Epoch [{epoch+1}/{num_epochs}] "
-                  f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f} | "
-                  f"Test Loss: {test_loss:.4f}, Test Acc: {test_acc:.4f}")
+                  f"RLDD Test Acc: {test_acc_rldd:.4f} | Dolos Test Acc: {test_acc_dolos:.4f}")
     
-    print(f"\n✓ Training completed!")
+    print(f"\n[OK] Training completed!")
     
     # Save model
     model_path = "checkpoints/fusion_brain_final.pth"
     os.makedirs("checkpoints", exist_ok=True)
     torch.save(model.state_dict(), model_path)
-    print(f"✓ Model saved: {model_path}")
+    print(f"[OK] Model saved: {model_path}")
     
     # Generate visualizations and reports
-    print("\n📊 Generating visualizations and reports...")
+    print("\n[PLOT] Generating visualizations and reports...")
     
     # Plot training curves
     metrics_handler.plot_training_curves()
     
-    # Evaluate final performance
-    print("\n🔍 Evaluating final performance...")
-    model.eval()
-    all_preds = []
-    all_labels = []
+    # Evaluate on all datasets and perform bias analysis
+    print("\n[BIAS] Performing bias analysis across datasets...")
     
-    with torch.no_grad():
-        for acoustic, linguistic, visual, labels in test_loader:
-            acoustic = acoustic.to(device)
-            linguistic = linguistic.to(device)
-            visual = visual.to(device)
-            
-            outputs = model(acoustic, linguistic, visual)
-            preds = torch.argmax(outputs, dim=1).cpu().numpy()
-            
-            all_preds.extend(preds)
-            all_labels.extend(labels.numpy())
+    # Create evaluation loaders dict with all 3 test sets
+    eval_loaders = {
+        'RLDD_Test': loaders['test_rldd'],
+        'Dolos_Test': loaders['test_dolos'],
+        'Dolos_Validation': loaders['val_dolos']
+    }
     
-    all_preds = np.array(all_preds)
-    all_labels = np.array(all_labels)
+    metrics_handler, results_dict = evaluate_model_with_bias_analysis(
+        model, eval_loaders, device, "FusionBrain"
+    )
     
-    # Generate confusion matrix and report
-    cm, cm_path = metrics_handler.plot_confusion_matrix(all_labels, all_preds, "RLDD_Test")
-    report = metrics_handler.generate_classification_report(all_labels, all_preds, "RLDD_Test")
-    
-    accuracy = (all_labels == all_preds).mean()
-    precision = report['Deception']['precision']
-    recall = report['Deception']['recall']
-    f1 = report['Deception']['f1-score']
-    
-    metrics_handler.save_detailed_report(all_labels, all_preds, "RLDD_Test")
+    # Plot bias comparison
+    if len(results_dict) > 1:
+        metrics_handler.plot_dataset_bias_comparison(results_dict)
     
     # Print summary
     print("\n" + "=" * 70)
-    print("FUSION TRAINING SUMMARY")
+    print("TRAINING SUMMARY")
     print("=" * 70)
-    print(f"\nTest Performance:")
-    print(f"  Accuracy:  {accuracy:.4f}")
-    print(f"  Precision: {precision:.4f}")
-    print(f"  Recall:    {recall:.4f}")
-    print(f"  F1-Score:  {f1:.4f}")
+    print(f"\nResults by dataset:")
+    for dataset, metrics in results_dict.items():
+        print(f"\n{dataset}:")
+        print(f"  Accuracy:  {metrics['accuracy']:.4f}")
+        print(f"  Precision: {metrics['precision']:.4f}")
+        print(f"  Recall:    {metrics['recall']:.4f}")
+        print(f"  F1-Score:  {metrics['f1']:.4f}")
     
-    print(f"\n📁 Results saved to: training_results/FusionBrain/")
+    print(f"\n[RESULTS] Results saved to: training_results/FusionBrain/")
     print("=" * 70)
 
 if __name__ == "__main__":
