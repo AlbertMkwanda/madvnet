@@ -5,6 +5,7 @@ import pandas as pd
 import os
 from torchvision.models.video import r2plus1d_18, R2Plus1D_18_Weights
 from tqdm import tqdm
+import config
 
 # 1. Setup the Pre-trained Video Model
 device = torch.device("cpu")
@@ -93,8 +94,8 @@ def run_visual_extraction(csv_path, video_folder, output_name):
 
 
 if __name__ == "__main__":
-    VIDEO_DIR = "C:/Users/User/Documents/Projects/main-project/data/clips"
-    DATA_DIR = "C:/Users/User/Documents/Projects/main-project/data/"
+    VIDEO_DIR = config.CLIPS_DIR
+    DATA_DIR = config.DATA_DIR
     
     print("\n" + "="*70)
     print("EXTRACTING VISUAL FEATURES FOR ALL SPLITS")

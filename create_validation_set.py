@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import os
 from sklearn.model_selection import train_test_split
+import config
 
 def normalize_labels(label):
     """Normalize label to lowercase for consistency."""
@@ -27,7 +28,7 @@ def create_validation_set():
     print("=" * 70)
 
     # Load the complete deduplicated dataset
-    csv_path = '../data/dolos_final_training_retranscribed_medium_dedup_complete.csv'
+    csv_path = config.FINAL_CSV
     
     if not os.path.exists(csv_path):
         print(f"Error: File not found: {csv_path}")

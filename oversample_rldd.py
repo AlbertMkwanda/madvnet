@@ -2,7 +2,7 @@ import os
 import random
 import re
 from pathlib import Path
-
+import configparser
 import pandas as pd
 
 
@@ -141,6 +141,6 @@ def oversample_rldd(final_csv_path: str, output_path: str = None, random_seed: i
 
 if __name__ == '__main__':
     base_dir = Path(__file__).resolve().parent.parent
-    input_csv = base_dir / 'data' / 'dolos_final_training_retranscribed_medium.csv'
+    input_csv =config.FINAL_CSV
     output_csv = base_dir / 'data' / 'dolos_final_training_retranscribed_medium_oversampled.csv'
     oversample_rldd(str(input_csv), str(output_csv), random_seed=2026)

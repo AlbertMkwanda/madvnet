@@ -8,6 +8,7 @@ import shutil
 import imageio_ffmpeg as ffmpeg
 from scipy import signal
 from scipy.fftpack import fft, ifft
+import config
 # 1. FFmpeg environment setup
 actual_ffmpeg_path = ffmpeg.get_ffmpeg_exe()
 ffmpeg_dir = os.path.dirname(actual_ffmpeg_path)
@@ -116,8 +117,8 @@ def process_and_save(csv_path, video_folder, output_prefix):
 
 
 if __name__ == "__main__":
-    VIDEO_DIR = "C:/Users/User/Documents/Projects/main-project/data/clips/"
-    DATA_DIR = "C:/Users/User/Documents/Projects/main-project/data/"
+    VIDEO_DIR = config.CLIPS_DIR
+    DATA_DIR = config.DATA_DIR
     
     # Process all 4 splits
     print("\n" + "="*70)

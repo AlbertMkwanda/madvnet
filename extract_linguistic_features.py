@@ -7,6 +7,7 @@ import re
 from textblob import TextBlob
 from transformers import RobertaTokenizer, RobertaModel
 from tqdm import tqdm
+import config
 
 # ==========================================
 # 1. SETUP & MODEL LOADING
@@ -158,7 +159,7 @@ def extract_775_linguistic_features(csv_path, output_name):
 # 4. EXECUTION
 # ==========================================
 if __name__ == "__main__":
-    DATA_DIR = "C:/Users/User/Documents/Projects/main-project/data/"
+    DATA_DIR = config.DATA_DIR
     
     print("\n" + "="*70)
     print("EXTRACTING LINGUISTIC FEATURES FOR ALL SPLITS")
