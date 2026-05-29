@@ -9,7 +9,9 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 CLIPS_DIR = "C:/Users/User/Documents/Projects/main-project/data/clips/"
 ORIGINAL_CSV ="C:/Users/User/Documents/Projects/main-project/data/dolos_processed.csv"
 FINAL_CSV = "C:/Users/User/Documents/Projects/main-project/data/dolos_final_training_retranscribed_medium_dedup_complete.csv"
-
+SEGMENTED_DATASET_CSV="C:/Users/User/Documents/Projects/main-project/data/segmented_dataset.csv"
+SEGMENTED_CLIPS_DIR = "C:/Users/User/Documents/Projects/main-project/data/segmented_clips/"
+SEGMENTED_CLIPS_DIR= "C:/Users/User/Documents/Projects/main-project/data/segmented_clips/"
 # Model Parameters
 IMG_SIZE = 112  # Standard for 3D-CNN/Vision Transformers
 SEQUENCE_LENGTH = 16  # Number of frames per video clip

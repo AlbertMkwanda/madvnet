@@ -1,25 +1,40 @@
 import pandas as pd
 import subprocess
 import os
+import shutil
 from pathlib import Path
 from tqdm import tqdm
 import logging
+import imageio_ffmpeg as ffmpeg
+import config
+
+# ==========================================
+# FFMPEG SETUP (same as extraction scripts)
+# ==========================================
+actual_ffmpeg_path = ffmpeg.get_ffmpeg_exe()
+ffmpeg_dir = os.path.dirname(actual_ffmpeg_path)
+standard_ffmpeg_path = os.path.join(ffmpeg_dir, "ffmpeg.exe")
+
+if not os.path.exists(standard_ffmpeg_path):
+    shutil.copy(actual_ffmpeg_path, standard_ffmpeg_path)
+os.environ["PATH"] += os.pathsep + ffmpeg_dir
+os.environ["IMAGEIO_FFMPEG_EXE"] = actual_ffmpeg_path
 
 # ==========================================
 # CONFIGURATION
 # ==========================================
 SEGMENT_DURATION_MS = 5000  # 5 seconds in milliseconds
-INPUT_CSV = "C:/Users/User/Documents/Projects/main-project/data/Final_CSV.csv"
-OUTPUT_CSV = "C:/Users/User/Documents/Projects/main-project/data/segmented_dataset.csv"
-VIDEO_INPUT_DIR = "C:/Users/User/Documents/Projects/main-project/data/clips/"
-VIDEO_OUTPUT_DIR = "C:/Users/User/Documents/Projects/main-project/data/segmented_clips/"
+INPUT_CSV = config.FINAL_CSV
+OUTPUT_CSV = config.SEGMENTED_DATASET_CSV
+VIDEO_INPUT_DIR = config.CLIPS_DIR.replace("\\", "/")
+VIDEO_OUTPUT_DIR = config.SEGMENTED_CLIPS_DIR.replace("\\", "/")
 
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('segmentation.log'),
+        logging.FileHandler('segmentation.log', encoding='utf-8'),
         logging.StreamHandler()
     ]
 )
@@ -34,29 +49,88 @@ def ms_to_seconds(milliseconds):
     return milliseconds / 1000.0
 
 
+def resolve_video_path(video_dir, file_name):
+    """
+    Resolve the actual video path, handling missing extensions.
+    
+    Tries:
+    1. As-is (file_name already has extension)
+    2. With .mp4 extension added
+    3. With .mkv extension added
+    4. Any video file matching the base name
+    
+    Returns the full path if found, None otherwise.
+    """
+    # Normalize video_dir to use backslashes for Windows file operations
+    video_dir_windows = video_dir.replace("/", "\\")
+    
+    # Try as-is first (use backslashes for Windows file checking)
+    full_path = os.path.join(video_dir_windows, file_name)
+    if os.path.exists(full_path):
+        return full_path.replace("\\", "/")
+    
+    # Try adding common extensions
+    for ext in ['.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv']:
+        full_path = os.path.join(video_dir_windows, f"{file_name}{ext}")
+        if os.path.exists(full_path):
+            return full_path.replace("\\", "/")
+    
+    # Try finding any file that starts with the base name
+    base_name = Path(file_name).stem
+    try:
+        for file in os.listdir(video_dir_windows):
+            if file.startswith(base_name) and not file.endswith('.tmp'):
+                full_path = os.path.join(video_dir_windows, file)
+                if os.path.isfile(full_path):
+                    return full_path.replace("\\", "/")
+    except Exception:
+        pass
+    
+    return None
+
+
 def get_video_duration(video_path):
     """
-    Get video duration in milliseconds using ffprobe.
+    Get video duration in milliseconds by running ffmpeg and parsing output.
     Returns None if unable to determine.
     """
     try:
+        import imageio_ffmpeg
+        
+        # Verify file exists using Windows path format
+        windows_path = video_path.replace("/", "\\")
+        if not os.path.exists(windows_path):
+            logger.warning(f"Video file does not exist: {windows_path}")
+            return None
+        
+        # Get ffmpeg executable from imageio_ffmpeg
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        
+        # Run ffmpeg on the file (convert forward slashes for subprocess)
+        ffmpeg_input = video_path.replace("\\", "/")
+        
+        # Run ffmpeg - it will print to stderr and exit with error (no output file specified)
+        # But we can parse the duration from the output
         result = subprocess.run(
-            [
-                'ffprobe',
-                '-v', 'error',
-                '-show_entries', 'format=duration',
-                '-of', 'default=noprint_wrappers=1:nokey=1:novalue=1',
-                video_path
-            ],
+            [ffmpeg_exe, '-i', ffmpeg_input],
             capture_output=True,
             text=True,
             timeout=10
         )
         
-        if result.returncode == 0 and result.stdout.strip():
-            duration_seconds = float(result.stdout.strip())
-            duration_ms = int(duration_seconds * 1000)
+        # Parse stderr output for duration (format: Duration: HH:MM:SS.ms)
+        output = result.stderr + result.stdout
+        import re
+        duration_match = re.search(r'Duration: (\d+):(\d+):(\d+\.?\d*)', output)
+        
+        if duration_match:
+            hours = int(duration_match.group(1))
+            minutes = int(duration_match.group(2))
+            seconds = float(duration_match.group(3))
+            total_seconds = hours * 3600 + minutes * 60 + seconds
+            duration_ms = int(total_seconds * 1000)
             return duration_ms
+        
         return None
     except Exception as e:
         logger.warning(f"Failed to get duration for {video_path}: {e}")
@@ -66,6 +140,7 @@ def get_video_duration(video_path):
 def extract_video_segment(input_path, output_path, start_ms, end_ms):
     """
     Extract a video segment using ffmpeg with -c copy flag (fast, lossless).
+    Times remain in milliseconds internally.
     
     Args:
         input_path: Full path to input video
@@ -77,15 +152,19 @@ def extract_video_segment(input_path, output_path, start_ms, end_ms):
         True if successful, False otherwise
     """
     try:
+        # Convert milliseconds to seconds for ffmpeg
         start_sec = ms_to_seconds(start_ms)
         end_sec = ms_to_seconds(end_ms)
-        duration_sec = end_sec - start_sec
+        
+        # Convert to forward slashes for ffmpeg (cross-platform)
+        input_path = input_path.replace("\\", "/")
+        output_path = output_path.replace("\\", "/")
         
         command = [
             'ffmpeg',
             '-y',  # Overwrite output file
-            '-ss', str(start_sec),  # Start time
-            '-to', str(end_sec),  # End time
+            '-ss', str(start_sec),  # Start time (in seconds for ffmpeg)
+            '-to', str(end_sec),  # End time (in seconds for ffmpeg)
             '-i', input_path,
             '-c', 'copy',  # Copy codec (fast, lossless)
             '-avoid_negative_ts', 'make_zero',  # Avoid negative timestamps
@@ -109,8 +188,8 @@ def process_dataset(input_csv, output_csv, video_input_dir, video_output_dir):
     """
     Main processing function to segment all videos in the dataset.
     """
-    # Create output directory if it doesn't exist
-    os.makedirs(video_output_dir, exist_ok=True)
+    # Create output directory if it doesn't exist (use backslashes for Windows)
+    os.makedirs(video_output_dir.replace("/", "\\"), exist_ok=True)
     
     # Read the original CSV
     if not os.path.exists(input_csv):
@@ -144,12 +223,12 @@ def process_dataset(input_csv, output_csv, video_input_dir, video_output_dir):
             label = row['label']
             transcript = row['transcript']
             
-            # Construct full input path
-            input_video_path = os.path.join(video_input_dir, f"{file_name}")
+            # Resolve the actual video path (handles missing extensions)
+            input_video_path = resolve_video_path(video_input_dir, file_name)
             
             # Check if video exists
-            if not os.path.exists(input_video_path):
-                logger.warning(f"Video not found: {input_video_path}")
+            if input_video_path is None:
+                logger.warning(f"Video not found: {os.path.join(video_input_dir, file_name)} (tried common extensions)")
                 continue
             
             # Get video duration
@@ -165,9 +244,10 @@ def process_dataset(input_csv, output_csv, video_input_dir, video_output_dir):
             total_duration_ms = actual_end_ms - original_start_ms
             num_segments = (total_duration_ms + SEGMENT_DURATION_MS - 1) // SEGMENT_DURATION_MS  # Ceiling division
             
-            # Extract base filename without extension
-            base_name = Path(file_name).stem
-            file_extension = Path(file_name).suffix
+            # Extract base filename without extension from the actual found video file
+            actual_filename = os.path.basename(input_video_path)
+            base_name = Path(actual_filename).stem
+            file_extension = Path(actual_filename).suffix
             
             # Create segments
             for seg_idx in range(num_segments):
@@ -179,7 +259,7 @@ def process_dataset(input_csv, output_csv, video_input_dir, video_output_dir):
                 
                 # Create output filename with segment index
                 segment_file_name = f"{base_name}_seg{seg_idx + 1}{file_extension}"
-                output_video_path = os.path.join(video_output_dir, segment_file_name)
+                output_video_path = os.path.join(video_output_dir, segment_file_name).replace("\\", "/")
                 
                 # Extract segment using ffmpeg
                 success = extract_video_segment(
@@ -200,9 +280,9 @@ def process_dataset(input_csv, output_csv, video_input_dir, video_output_dir):
                         'transcript': transcript
                     }
                     segmented_rows.append(segmented_row)
-                    logger.info(f"✓ Created segment: {segment_file_name} ({segment_start_ms}ms - {segment_end_ms}ms)")
+                    logger.info(f"[OK] Created segment: {segment_file_name} ({segment_start_ms}ms - {segment_end_ms}ms)")
                 else:
-                    logger.error(f"✗ Failed to create segment: {segment_file_name}")
+                    logger.error(f"[FAILED] Failed to create segment: {segment_file_name}")
         
         except Exception as e:
             logger.error(f"Error processing row {idx}: {e}")
@@ -217,7 +297,7 @@ def process_dataset(input_csv, output_csv, video_input_dir, video_output_dir):
     
     try:
         output_df.to_csv(output_csv, index=False)
-        logger.info(f"\n✓ Segmentation complete!")
+        logger.info(f"\n[OK] Segmentation complete!")
         logger.info(f"  Original rows: {len(df)}")
         logger.info(f"  Segmented rows: {len(output_df)}")
         logger.info(f"  Output CSV: {output_csv}")
@@ -246,9 +326,9 @@ if __name__ == "__main__":
     
     if success:
         logger.info("\n" + "="*70)
-        logger.info("✓ SEGMENTATION SUCCESSFUL")
+        logger.info("[OK] SEGMENTATION SUCCESSFUL")
         logger.info("="*70)
     else:
         logger.error("\n" + "="*70)
-        logger.error("✗ SEGMENTATION FAILED")
+        logger.error("[FAILED] SEGMENTATION FAILED")
         logger.error("="*70)
